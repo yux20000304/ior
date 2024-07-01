@@ -133,6 +133,7 @@ typedef struct {
   int verification_error;
   int remove_only;
   int rename_dirs;
+  int rename_files;
   int leaf_only;
   unsigned branch_factor;
   int depth;
@@ -1124,7 +1125,7 @@ void directory_test(const int iteration, const int ntasks, const char *path, ran
 
     VERBOSE(1,-1,"   Directory creation: %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_CREATE_NUM], o.summary_table[iteration].rate[MDTEST_DIR_CREATE_NUM]);
     VERBOSE(1,-1,"   Directory stat    : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_STAT_NUM], o.summary_table[iteration].rate[MDTEST_DIR_STAT_NUM]);
-    VERBOSE(1,-1,"   Directory rename : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_RENAME_NUM], o.summary_table[iteration].rate[MDTEST_DIR_RENAME_NUM]);
+    VERBOSE(1,-1,"   Directory rename  : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_RENAME_NUM], o.summary_table[iteration].rate[MDTEST_DIR_RENAME_NUM]);
     VERBOSE(1,-1,"   Directory removal : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_REMOVE_NUM], o.summary_table[iteration].rate[MDTEST_DIR_REMOVE_NUM]);
 }
 
@@ -1311,7 +1312,7 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
     }
 
     /* stat phase */
-    if (o.stat_only ) {
+    if (o.stat_only) {
       phase_prepare();
       if(o.savePerOpDataCSV != NULL) {
         char path[MAX_PATHLEN];
@@ -1380,6 +1381,39 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
       updateResult(res, MDTEST_FILE_READ_NUM, o.items, t_start, t_end, t_end_before_barrier);
     }
 
+    /* rename phase */
+    if(o.rename_files && o.items > 1){
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_RENAME_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(STAT_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+
+        VERBOSE(3,5,"file_test: rename path is '%s'", temp_path );
+
+        /* rename files */
+        rename_dir_test(0, dir_iter, temp_path, progress);
+      }
+      t_end_before_barrier = GetTimeStamp();
+      phase_end();
+      t_end = GetTimeStamp();
+      OpTimerFree(& progress->ot);
+      updateResult(res, MDTEST_FILE_RENAME_NUM, o.items, t_start, t_end, t_end_before_barrier);
+    }
+
     /* remove phase */
     if (o.remove_only) {
       phase_prepare();
@@ -1438,6 +1472,7 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
     }
     VERBOSE(1,-1,"  File stat         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_STAT_NUM], o.summary_table[iteration].rate[MDTEST_FILE_STAT_NUM]);
     VERBOSE(1,-1,"  File read         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_READ_NUM], o.summary_table[iteration].rate[MDTEST_FILE_READ_NUM]);
+    VERBOSE(1,-1,"  File rename       : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_RENAME_NUM], o.summary_table[iteration].rate[MDTEST_FILE_RENAME_NUM]);
     VERBOSE(1,-1,"  File removal      : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_REMOVE_NUM], o.summary_table[iteration].rate[MDTEST_FILE_REMOVE_NUM]);
 }
 
@@ -1451,6 +1486,7 @@ char const * mdtest_test_name(int i){
   case MDTEST_FILE_CREATE_NUM: return "File creation";
   case MDTEST_FILE_STAT_NUM:   return "File stat";
   case MDTEST_FILE_READ_NUM:   return "File read";
+  case MDTEST_FILE_RENAME_NUM: return "File rename";
   case MDTEST_FILE_REMOVE_NUM: return "File removal";
   case MDTEST_TREE_CREATE_NUM: return "Tree creation";
   case MDTEST_TREE_REMOVE_NUM: return "Tree removal";
@@ -1798,8 +1834,8 @@ void md_validate_tests() {
         FAIL( "Error, stone wall timer does only work with a branch factor <= 1 (current is %d) and with barriers\n", o.branch_factor);
     }
 
-    if (!o.create_only && ! o.stat_only && ! o.read_only && !o.remove_only && !o.rename_dirs) {
-        o.create_only = o.stat_only = o.read_only = o.remove_only = o.rename_dirs = 1;
+    if (!o.create_only && ! o.stat_only && ! o.read_only && !o.remove_only && !o.rename_dirs && !o.rename_files) {
+        o.create_only = o.stat_only = o.read_only = o.remove_only = o.rename_dirs = o.rename_files = 1;
         VERBOSE(1,-1,"main: Setting create/stat/read/remove_only to True" );
     }
 
