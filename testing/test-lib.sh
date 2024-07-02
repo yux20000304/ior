@@ -21,7 +21,7 @@ MDWB_EXTRA=${MDWB_EXTRA:-}
 
 ################################################################################
 mkdir -p ${IOR_OUT}
-mkdir -p ${IOR_TMP}/mdest
+mkdir -p ${IOR_TMP}/mdtest
 
 ## Sanity check
 
@@ -60,8 +60,8 @@ function IOR(){
 function MDTEST(){
   RANKS=$1
   shift
-  rm -rf ${IOR_TMP}/mdest
-  WHAT="${IOR_MPIRUN} $RANKS ${IOR_BIN_DIR}/mdtest ${@} -d ${IOR_TMP}/mdest ${MDTEST_EXTRA} -V=4"
+  rm -rf ${IOR_TMP}/mdtest
+  WHAT="${IOR_MPIRUN} $RANKS ${IOR_BIN_DIR}/mdtest ${@} -d ${IOR_TMP}/mdtest ${MDTEST_EXTRA} -V=4"
   $WHAT 1>"${IOR_OUT}/test_out.$I" 2>&1
   if [[ $? != 0 ]]; then
     echo -n "ERR"
