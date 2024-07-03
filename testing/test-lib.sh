@@ -17,6 +17,7 @@ IOR_EXTRA=${IOR_EXTRA:-} # Add global options like verbosity
 MDTEST_EXTRA=${MDTEST_EXTRA:-}
 MDTEST_TEST_PATTERNS=${MDTEST_TEST_PATTERNS:-../testing/mdtest-patterns/$TYPE}
 MDWB_EXTRA=${MDWB_EXTRA:-}
+LOG_VERBOSE=${LOG_VERBOSE:-4}
 
 
 ################################################################################
@@ -61,7 +62,7 @@ function MDTEST(){
   RANKS=$1
   shift
   rm -rf ${IOR_TMP}/mdtest
-  WHAT="${IOR_MPIRUN} $RANKS ${IOR_BIN_DIR}/mdtest ${@} -d ${IOR_TMP}/mdtest ${MDTEST_EXTRA} -V=4"
+  WHAT="${IOR_MPIRUN} $RANKS ${IOR_BIN_DIR}/mdtest ${@} -d ${IOR_TMP}/mdtest ${MDTEST_EXTRA} -V=${LOG_VERBOSE}"
   $WHAT 1>"${IOR_OUT}/test_out.$I" 2>&1
   if [[ $? != 0 ]]; then
     echo -n "ERR"
