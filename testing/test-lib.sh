@@ -15,7 +15,7 @@ IOR_OUT=${IOR_OUT:-./test_logs/$TYPE}
 IOR_TMP=${IOR_TMP:-/dev/shm}
 IOR_EXTRA=${IOR_EXTRA:-} # Add global options like verbosity
 MDTEST_EXTRA=${MDTEST_EXTRA:-}
-MDTEST_TEST_PATTERNS=${MDTEST_TEST_PATTERNS:-../testing/mdtest-patterns/$TYPE}
+MDTEST_TEST_PATTERNS=${MDTEST_TEST_PATTERNS:-./testing/mdtest-patterns/$TYPE}
 MDWB_EXTRA=${MDWB_EXTRA:-}
 LOG_VERBOSE=${LOG_VERBOSE:-4}
 
