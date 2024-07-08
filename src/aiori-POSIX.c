@@ -104,6 +104,7 @@ static void POSIX_Finalize(aiori_mod_opt_t * options);
 
 static IOR_offset_t POSIX_Xfer(int, aiori_fd_t *, IOR_size_t *,
                                IOR_offset_t, IOR_offset_t, aiori_mod_opt_t *);
+int POSIX_Truncate(char *testFileName, IOR_offset_t newlength, aiori_mod_opt_t *param);
 
 option_help * POSIX_options(aiori_mod_opt_t ** init_backend_options, aiori_mod_opt_t * init_values){
   posix_options_t * o = malloc(sizeof(posix_options_t));
@@ -191,6 +192,7 @@ ior_aiori_t posix_aiori = {
         .get_options = POSIX_options,
         .enable_mdtest = true,
         .sync = POSIX_Sync,
+        .truncate = POSIX_Truncate,
         .check_params = POSIX_check_params
 };
 
@@ -876,6 +878,18 @@ void POSIX_Close(aiori_fd_t *afd, aiori_mod_opt_t * param)
                 ERRF("close(%d) failed", fd);
         }
         free(afd);
+}
+
+/* 
+ * Truncate files
+ */
+int POSIX_Truncate(char *testFileName, IOR_offset_t newlength, aiori_mod_opt_t *param) {
+    int ret;
+    ret = truncate(testFileName, newlength);
+    if(ret < 0){
+        WARNF("[RANK %03d]: truncate of file \"%s\" failed", rank, testFileName);
+    }
+    return ret;  
 }
 
 /*

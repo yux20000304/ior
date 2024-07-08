@@ -170,6 +170,7 @@ typedef struct {
   size_t write_bytes;
   int stone_wall_timer_seconds;
   size_t read_bytes;
+  size_t truncate_bytes;
   int sync_file;
   int call_sync;
   int path_count;
@@ -778,6 +779,92 @@ void mdtest_read(int random, int dirs, const long dir_iter, char *path, rank_pro
     }
 }
 
+/* truncates all of the items created as specified by the input parameters */
+void mdtest_truncate(int random, int dirs, const long dir_iter, char *path, rank_progress_t *progress){
+    uint64_t parent_dir, item_num = 0;
+    char item[MAX_PATHLEN], temp[MAX_PATHLEN];
+    aiori_fd_t *aiori_fh;
+
+    VERBOSE(1,-1,"Entering mdtest_truncate on %s", path );
+
+    uint64_t stop_items = o.items;
+
+    if( o.directory_loops != 1 ){
+      stop_items = o.items_per_dir;
+    }
+
+    /* iterate over all of the item IDs */
+    for (uint64_t i = 0 ; i < stop_items ; ++i) {
+        /*
+         * It doesn't make sense to pass the address of the array because that would
+         * be like passing char **. Tested it on a Cray and it seems to work either
+         * way, but it seems that it is correct without the "&".
+         *
+         * NTH: Both are technically correct in C.
+         *
+         * memset(&item, 0, MAX_PATHLEN);
+         */
+        memset(item, 0, MAX_PATHLEN);
+        memset(temp, 0, MAX_PATHLEN);
+
+        /* determine the item number to read */
+        if (random) {
+            item_num = o.rand_array[i];
+        } else {
+            item_num = i;
+        }
+
+        /* make adjustments if in leaf only mode*/
+        if (o.leaf_only) {
+            item_num += o.items_per_dir *
+                (o.num_dirs_in_tree - (uint64_t) pow (o.branch_factor, o.depth));
+        }
+
+        /* create name of file to read */
+        if (!dirs) {
+            if ((i%ITEM_COUNT == 0) && (i != 0)) {
+                VERBOSE(3,5,"read file: "LLU"", i);
+            }
+            sprintf(item, "file.%s"LLU"", o.read_name, item_num);
+        }
+
+        /* determine the path to the file/dir to be truncated */
+        parent_dir = item_num / o.items_per_dir;
+
+        if (parent_dir > 0) {        //item is not in tree's root directory
+
+            /* prepend parent directory to item's path */
+            sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+            strcpy(item, temp);
+
+            /* still not at the tree's root dir */
+            while (parent_dir > o.branch_factor) {
+                parent_dir = (unsigned long long) ((parent_dir-1) / o.branch_factor);
+                sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+                strcpy(item, temp);
+            }
+        }
+
+        /* Now get item to have the full path */
+        sprintf( temp, "%s/%s", path, item );
+        strcpy( item, temp );
+
+        /* below temp used to be hiername */
+        VERBOSE(3,5,"mdtest_truncate file: %s", item);
+
+        double start = GetTimeStamp();
+
+        /* truncate file */
+        if (o.truncate_bytes > 0) {
+            if (-1 == (size_t) o.backend->truncate(item, o.truncate_bytes, o.backend_options)) {
+                WARNF("unable to truncate file %s", item);
+                o.verification_error += 1;
+                continue;
+            }     
+        }
+    }
+}
+
 /* This method should be called by rank 0.  It subsequently does all of
    the creates and removes for the other ranks */
 void collective_create_remove(const int create, const int dirs, const int ntasks, const char *path, rank_progress_t * progress) {
@@ -1381,6 +1468,39 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
       updateResult(res, MDTEST_FILE_READ_NUM, o.items, t_start, t_end, t_end_before_barrier);
     }
 
+    /* truncate phase */
+    if (o.read_only && o.truncate_bytes >= 0) {
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_TRUNCATE_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(READ_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+
+        VERBOSE(3,5,"file_test: truncate path is '%s'", temp_path );
+
+        /* read files */
+        mdtest_truncate(o.random_seed, 0, dir_iter, temp_path, progress);
+      }
+      t_end_before_barrier = GetTimeStamp();
+      phase_end();
+      t_end = GetTimeStamp();
+      OpTimerFree(& progress->ot);
+      updateResult(res, MDTEST_FILE_TRUNCATE_NUM, o.items, t_start, t_end, t_end_before_barrier);
+    }
+
     /* rename phase */
     if(o.rename_files && o.items > 1){
       phase_prepare();
@@ -1472,6 +1592,7 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
     }
     VERBOSE(1,-1,"  File stat         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_STAT_NUM], o.summary_table[iteration].rate[MDTEST_FILE_STAT_NUM]);
     VERBOSE(1,-1,"  File read         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_READ_NUM], o.summary_table[iteration].rate[MDTEST_FILE_READ_NUM]);
+    VERBOSE(1,-1,"  File truncate     : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_TRUNCATE_NUM], o.summary_table[iteration].rate[MDTEST_FILE_TRUNCATE_NUM]);
     VERBOSE(1,-1,"  File rename       : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_RENAME_NUM], o.summary_table[iteration].rate[MDTEST_FILE_RENAME_NUM]);
     VERBOSE(1,-1,"  File removal      : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_REMOVE_NUM], o.summary_table[iteration].rate[MDTEST_FILE_REMOVE_NUM]);
 }
@@ -1486,6 +1607,7 @@ char const * mdtest_test_name(int i){
   case MDTEST_FILE_CREATE_NUM: return "File creation";
   case MDTEST_FILE_STAT_NUM:   return "File stat";
   case MDTEST_FILE_READ_NUM:   return "File read";
+  case MDTEST_FILE_TRUNCATE_NUM: return "File truncate";
   case MDTEST_FILE_RENAME_NUM: return "File rename";
   case MDTEST_FILE_REMOVE_NUM: return "File removal";
   case MDTEST_TREE_CREATE_NUM: return "Tree creation";
@@ -1921,8 +2043,8 @@ void md_validate_tests() {
     if(o.read_only && o.read_bytes <= 0)
       WARN("Read bytes is 0, thus, a read test will actually just open/close");
 
-    if(o.create_only && o.read_only && o.read_bytes > o.write_bytes)
-      FAIL("When writing and reading files, read bytes must be smaller than write bytes");
+    if(o.create_only && o.read_only && o.read_bytes > o.write_bytes && o.truncate_bytes > o.write_bytes)
+      FAIL("When writing and reading files, read bytes and truncate bytes must be smaller than write bytes");
 
     if (rank == 0 && o.saveRankDetailsCSV){
       // check that the file is writeable, truncate it and add header
@@ -2362,6 +2484,7 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE * 
       {'p', NULL,        "pre-iteration delay (in seconds)", OPTION_OPTIONAL_ARGUMENT, 'd', & o.pre_delay},
       {'P', NULL,        "print rate AND time", OPTION_FLAG, 'd', & o.print_rate_and_time},
       {0, "print-all-procs", "all processes print an excerpt of their results", OPTION_FLAG, 'd', & o.print_all_proc},
+      {'q', NULL,        "bytes to read from each file", OPTION_OPTIONAL_ARGUMENT, 'l', & o.truncate_bytes},
       {'R', NULL,        "random access to files (only for stat)", OPTION_FLAG, 'd', & randomize},
       {0, "random-seed", "random seed for -R", OPTION_OPTIONAL_ARGUMENT, 'd', & o.random_seed},
       {'s', NULL,        "stride between the number of tasks for each test", OPTION_OPTIONAL_ARGUMENT, 'd', & stride},
@@ -2473,6 +2596,7 @@ mdtest_results_t * mdtest_run(int argc, char **argv, MPI_Comm world_com, FILE * 
     }
     VERBOSE(1,-1, "dirs_only               : %s", ( o.dirs_only ? "True" : "False" ));
     VERBOSE(1,-1, "read_bytes              : "LLU"", o.read_bytes );
+    VERBOSE(1,-1, "truncate_bytes          : "LLU"", o.truncate_bytes );
     VERBOSE(1,-1, "read_only               : %s", ( o.read_only ? "True" : "False" ));
     VERBOSE(1,-1, "first                   : %d", first );
     VERBOSE(1,-1, "files_only              : %s", ( o.files_only ? "True" : "False" ));

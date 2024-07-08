@@ -13,7 +13,7 @@ LOG_VERBOSE=1
 source $ROOT/test-lib.sh
 
 
-#test command
+#pressure test command 
 MDTEST 1 -i 3 -n 2000 -p 5 -u -w 4096
 MDTEST 2 -i 3 -n 2000 -p 5 -u -w 4096
 MDTEST 4 -i 3 -n 2000 -p 5 -u -w 4096
@@ -24,3 +24,7 @@ MDTEST 64 -i 3 -n 2000 -p 5 -u -w 4096
 MDTEST 128 -i 3 -n 2000 -p 5 -u -w 4096
 MDTEST 256 -i 3 -n 2000 -p 5 -u -w 4096
 MDTEST 512 -i 3 -n 2000 -p 5 -u -w 4096
+
+#truncate test command
+MDTEST 32 -i 3 -n 2000 -p 5 -u -w 4096 -q 2048
+MDTEST 64 -i 3 -n 2000 -p 5 -u -w 4096 -q 2048
