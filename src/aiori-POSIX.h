@@ -59,6 +59,7 @@ int POSIX_Rename(const char *oldfile, const char *newfile, aiori_mod_opt_t * mod
 void POSIX_Close(aiori_fd_t *fd, aiori_mod_opt_t * module_options);
 option_help * POSIX_options(aiori_mod_opt_t ** init_backend_options, aiori_mod_opt_t * init_values);
 void POSIX_xfer_hints(aiori_xfer_hint_t * params);
+int POSIX_Truncate(const char *testFileName, IOR_offset_t newlength, aiori_mod_opt_t *param);
 
 
 #endif
