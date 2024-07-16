@@ -113,6 +113,9 @@ typedef struct ior_aiori {
         int (*check_params)(aiori_mod_opt_t *); /* check if the provided module_optionseters for the given test and the module options are correct, if they aren't print a message and exit(1) or return 1*/
         void (*sync)(aiori_mod_opt_t * ); /* synchronize every pending operation for this storage */
         int (*truncate)(const char *path, IOR_offset_t size , aiori_mod_opt_t * module_options); /* truncate files */
+        int (*setattr)(const char *path, aiori_mod_opt_t * module_options); /* set attributes */
+        int (*symlink)(const char *targetpath, const char *linkpath, aiori_mod_opt_t * module_options); /* create symlinks */
+        int (*readlink)(const char *path, aiori_mod_opt_t * module_options); /* read symlinks */
         bool enable_mdtest;
 } ior_aiori_t;
 

@@ -779,11 +779,264 @@ void mdtest_read(int random, int dirs, const long dir_iter, char *path, rank_pro
     }
 }
 
-/* truncates all of the items created as specified by the input parameters */
-void mdtest_truncate(int random, int dirs, const long dir_iter, char *path, rank_progress_t *progress){
+/* symlink all of the items created as specified by the input parameters */
+void mdtest_symlink(const int random, const int dirs, const long dir_iter, char *path, rank_progress_t *progress){
+    uint64_t parent_dir, item_num = 0;
+    char item[MAX_PATHLEN], temp[MAX_PATHLEN], link_item[MAX_PATHLEN];
+    aiori_fd_t *aiori_fh;
+
+    VERBOSE(1,-1,"Entering mdtest_symlink on %s", path );
+
+    uint64_t stop_items = o.items;
+    
+    if( o.directory_loops != 1 ){
+      stop_items = o.items_per_dir;
+    }
+
+    /* iterate over all of the item IDs */
+    for(uint64_t i = 0 ; i < stop_items ; ++i){
+        /*
+         * It doesn't make sense to pass the address of the array because that would
+         * be like passing char **. Tested it on a Cray and it seems to work either
+         * way, but it seems that it is correct without the "&".
+         *
+         * memset(&item, 0, MAX_PATHLEN);
+         */
+        memset(item, 0, MAX_PATHLEN);
+        memset(temp, 0, MAX_PATHLEN);
+        memset(link_item, 0, MAX_PATHLEN);
+        /* determine the item number to symlink */
+        if (random) {
+            item_num = o.rand_array[i];
+        } else {
+            item_num = i;
+        }
+
+        /* make adjustments if in leaf only mode*/
+        if (o.leaf_only) {
+            item_num += o.items_per_dir *
+                (o.num_dirs_in_tree - (uint64_t) pow (o.branch_factor, o.depth));
+        }
+
+        /* create name of file/dir to symlink */
+        if (dirs){
+            if ((i%ITEM_COUNT == 0) && (i != 0)) {
+                VERBOSE(3,5,"symlink dirs: "LLU"", i);
+            }
+            sprintf(item, "dir.%s"LLU"", o.stat_name, item_num);
+        } else{
+            if ((i%ITEM_COUNT == 0) && (i != 0)) {
+                VERBOSE(3,5,"symlink file: "LLU"", i);
+            }
+            sprintf(item, "file.%s"LLU"", o.read_name, item_num);
+        }
+
+        /* determine the path to the file/dir to be symlink'ed */
+        parent_dir = item_num / o.items_per_dir;
+
+        if(parent_dir > 0){   //item is not in tree's root directory
+
+            /* prepend parent directory to item's path */
+            sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+            strcpy(item, temp);
+
+            //still not at the tree's root dir
+            while (parent_dir > o.branch_factor){
+                parent_dir = (unsigned long long) ((parent_dir-1) / o.branch_factor);
+                sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+                strcpy(item, temp);
+            }
+        }
+
+        /* Now get item to have the full path */
+        sprintf( temp, "%s/%s", path, item );
+        strcpy( item, temp );
+        sprintf(link_item, "%s.link", item);
+
+        /* below temp used to be hiername */
+        VERBOSE(3,5,"mdtest_symlink %4s: %s", (dirs ? "dir" : "file"), item);
+        double start = GetTimeStamp();
+        if (-1 == o.backend->symlink (item, link_item, o.backend_options)) {
+            WARNF("unable to symlink file %s to %s", item, link_item);
+        }
+        if(progress->ot) OpTimerValue(progress->ot, start - progress->start_time, GetTimeStamp() - start);        
+    }
+
+}
+
+/* readlink all of the items created as specified by the input parameters */
+void mdtest_readlink(const int random, const int dirs, const long dir_iter, char *path, rank_progress_t *progress){
+    uint64_t parent_dir, item_num = 0;
+    char item[MAX_PATHLEN], temp[MAX_PATHLEN], link_item[MAX_PATHLEN];
+    aiori_fd_t *aiori_fh;
+
+    VERBOSE(1,-1,"Entering mdtest_readlink on %s", path );
+
+    uint64_t stop_items = o.items;
+    
+    if( o.directory_loops != 1 ){
+      stop_items = o.items_per_dir;
+    }
+
+    /* iterate over all of the item IDs */
+    for(uint64_t i = 0 ; i < stop_items ; ++i){
+        /*
+         * It doesn't make sense to pass the address of the array because that would
+         * be like passing char **. Tested it on a Cray and it seems to work either
+         * way, but it seems that it is correct without the "&".
+         *
+         * memset(&item, 0, MAX_PATHLEN);
+         */
+        memset(item, 0, MAX_PATHLEN);
+        memset(temp, 0, MAX_PATHLEN);
+        memset(link_item, 0, MAX_PATHLEN);
+        /* determine the item number to readlink */
+        if (random) {
+            item_num = o.rand_array[i];
+        } else {
+            item_num = i;
+        }
+
+        /* make adjustments if in leaf only mode*/
+        if (o.leaf_only) {
+            item_num += o.items_per_dir *
+                (o.num_dirs_in_tree - (uint64_t) pow (o.branch_factor, o.depth));
+        }
+
+        /* create name of file/dir to readlink */
+        if (dirs){
+            if ((i%ITEM_COUNT == 0) && (i != 0)) {
+                VERBOSE(3,5,"readlink dirs: "LLU"", i);
+            }
+            sprintf(item, "dir.%s"LLU"", o.stat_name, item_num);
+        } else{
+            if ((i%ITEM_COUNT == 0) && (i != 0)) {
+                VERBOSE(3,5,"readlink file: "LLU"", i);
+            }
+            sprintf(item, "file.%s"LLU"", o.read_name, item_num);
+        }
+
+        /* determine the path to the file/dir to be readlink'ed */
+        parent_dir = item_num / o.items_per_dir;
+
+        if(parent_dir > 0){   //item is not in tree's root directory
+
+            /* prepend parent directory to item's path */
+            sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+            strcpy(item, temp);
+
+            //still not at the tree's root dir
+            while (parent_dir > o.branch_factor){
+                parent_dir = (unsigned long long) ((parent_dir-1) / o.branch_factor);
+                sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+                strcpy(item, temp);
+            }
+        }
+
+        /* Now get item to have the full path */
+        sprintf( temp, "%s/%s", path, item );
+        strcpy( item, temp );
+        sprintf(link_item, "%s.link", item);
+
+        /* below temp used to be hiername */
+        VERBOSE(3,5,"mdtest_readlink %4s: %s", (dirs ? "dir" : "file"), item);
+        double start = GetTimeStamp();
+        if (-1 == o.backend->readlink (link_item, o.backend_options)) {
+            WARNF("unable to readlink file %s", link_item);
+        }
+        if(progress->ot) OpTimerValue(progress->ot, start - progress->start_time, GetTimeStamp() - start);        
+    }
+
+}
+
+/* unlink all of the items created as specified by the input parameters */
+void mdtest_unlink(const int random, const int dirs, const long dir_iter, char *path, rank_progress_t *progress){
+    uint64_t parent_dir, item_num = 0;
+    char item[MAX_PATHLEN], temp[MAX_PATHLEN], link_item[MAX_PATHLEN];
+    aiori_fd_t *aiori_fh;
+
+    VERBOSE(1,-1,"Entering mdtest_unlink on %s", path );
+
+    uint64_t stop_items = o.items;
+    
+    if( o.directory_loops != 1 ){
+      stop_items = o.items_per_dir;
+    }
+
+    /* iterate over all of the item IDs */
+    for(uint64_t i = 0 ; i < stop_items ; ++i){
+        /*
+         * It doesn't make sense to pass the address of the array because that would
+         * be like passing char **. Tested it on a Cray and it seems to work either
+         * way, but it seems that it is correct without the "&".
+         *
+         * memset(&item, 0, MAX_PATHLEN);
+         */
+        memset(item, 0, MAX_PATHLEN);
+        memset(temp, 0, MAX_PATHLEN);
+        memset(link_item, 0, MAX_PATHLEN);
+        /* determine the item number to unlink */
+        if (random) {
+            item_num = o.rand_array[i];
+        } else {
+            item_num = i;
+        }
+
+        /* make adjustments if in leaf only mode*/
+        if (o.leaf_only) {
+            item_num += o.items_per_dir *
+                (o.num_dirs_in_tree - (uint64_t) pow (o.branch_factor, o.depth));
+        }
+
+        /* create name of file/dir to unlink */
+        if (dirs){
+            if ((i%ITEM_COUNT == 0) && (i != 0)) {
+                VERBOSE(3,5,"unlink dirs: "LLU"", i);
+            }
+            sprintf(item, "dir.%s"LLU"", o.stat_name, item_num);
+        } else{
+            if ((i%ITEM_COUNT == 0) && (i != 0)) {
+                VERBOSE(3,5,"unlink file: "LLU"", i);
+            }
+            sprintf(item, "file.%s"LLU"", o.read_name, item_num);
+        }
+
+        /* determine the path to the file/dir to be unlink'ed */
+        parent_dir = item_num / o.items_per_dir;
+
+        if(parent_dir > 0){   //item is not in tree's root directory
+
+            /* prepend parent directory to item's path */
+            sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+            strcpy(item, temp);
+
+            //still not at the tree's root dir
+            while (parent_dir > o.branch_factor){
+                parent_dir = (unsigned long long) ((parent_dir-1) / o.branch_factor);
+                sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+                strcpy(item, temp);
+            }
+        }
+
+        /* Now get item to have the full path */
+        sprintf( temp, "%s/%s", path, item );
+        strcpy( item, temp );
+        sprintf(link_item, "%s.link", item);
+
+        /* below temp used to be hiername */
+        VERBOSE(3,5,"mdtest_unlink %4s: %s", (dirs ? "dir" : "file"), item);
+        double start = GetTimeStamp();
+        /* unlink files */
+        o.backend->remove (link_item, o.backend_options);
+        if(progress->ot) OpTimerValue(progress->ot, start - progress->start_time, GetTimeStamp() - start);        
+    }
+
+}
+
+/* truncates all of the files created as specified by the input parameters */
+void mdtest_truncate(const int random, const int dirs, const long dir_iter, char *path, rank_progress_t *progress){
     uint64_t parent_dir, item_num = 0;
     char item[MAX_PATHLEN], temp[MAX_PATHLEN];
-    aiori_fd_t *aiori_fh;
 
     VERBOSE(1,-1,"Entering mdtest_truncate on %s", path );
 
@@ -807,7 +1060,7 @@ void mdtest_truncate(int random, int dirs, const long dir_iter, char *path, rank
         memset(item, 0, MAX_PATHLEN);
         memset(temp, 0, MAX_PATHLEN);
 
-        /* determine the item number to read */
+        /* determine the item number to truncate */
         if (random) {
             item_num = o.rand_array[i];
         } else {
@@ -820,7 +1073,7 @@ void mdtest_truncate(int random, int dirs, const long dir_iter, char *path, rank
                 (o.num_dirs_in_tree - (uint64_t) pow (o.branch_factor, o.depth));
         }
 
-        /* create name of file to read */
+        /* create name of file to truncate */
         if (!dirs) {
             if ((i%ITEM_COUNT == 0) && (i != 0)) {
                 VERBOSE(3,5,"read file: "LLU"", i);
@@ -945,6 +1198,7 @@ void collective_create_remove(const int create, const int dirs, const int ntasks
     }
 }
 
+/* shuffle the files or directory */
 void rename_dir_test(const int dirs, const long dir_iter, const char *path, rank_progress_t * progress) {
     uint64_t parent_dir, item_num = 0;
     char item[MAX_PATHLEN], temp[MAX_PATHLEN];
@@ -1455,17 +1709,106 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
         VERBOSE(3,5,"file_test: read path is '%s'", temp_path );
 
         /* read files */
-        if (o.random_seed > 0) {
-                mdtest_read(1, 0, dir_iter, temp_path, progress);
-        } else {
-                mdtest_read(0, 0, dir_iter, temp_path, progress);
-        }
+        mdtest_read((o.random_seed > 0 ? 1 : 0), 0, dir_iter, temp_path, progress);
       }
       t_end_before_barrier = GetTimeStamp();
       phase_end();
       t_end = GetTimeStamp();
       OpTimerFree(& progress->ot);
       updateResult(res, MDTEST_FILE_READ_NUM, o.items, t_start, t_end, t_end_before_barrier);
+    }
+
+    /* symlink phase */
+    if (o.read_only) {
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_SYMLINK_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(READ_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+        VERBOSE(3,5,"file_test: symlink path is '%s'", temp_path );
+
+        /* symlink files */
+        mdtest_symlink(0, 0, dir_iter, temp_path, progress);
+        phase_end();
+        t_end = GetTimeStamp();
+        OpTimerFree(& progress->ot);
+        updateResult(res, MDTEST_FILE_SYMLINK_NUM, o.items, t_start, t_end, t_end_before_barrier);
+      }
+    }
+
+    /* readlink phase */
+    if (o.read_only) {
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_READLINK_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(READ_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+        VERBOSE(3,5,"file_test: readlink path is '%s'", temp_path );
+
+        /* readlink files */
+        mdtest_readlink(0, 0, dir_iter, temp_path, progress);
+        phase_end();
+        t_end = GetTimeStamp();
+        OpTimerFree(& progress->ot);
+        updateResult(res, MDTEST_FILE_READLINK_NUM, o.items, t_start, t_end, t_end_before_barrier);
+      }
+    }
+
+    /* unlink*/
+    if (o.read_only) {
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_UNLINK_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(READ_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+        VERBOSE(3,5,"file_test: unlink path is '%s'", temp_path );
+
+        /* unlink files */
+        mdtest_unlink(0, 0, dir_iter, temp_path, progress);
+        phase_end();
+        t_end = GetTimeStamp();
+        OpTimerFree(& progress->ot);
+        updateResult(res, MDTEST_FILE_UNLINK_NUM, o.items, t_start, t_end, t_end_before_barrier);
+      }
     }
 
     /* truncate phase */
@@ -1492,7 +1835,7 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
         VERBOSE(3,5,"file_test: truncate path is '%s'", temp_path );
 
         /* read files */
-        mdtest_truncate(o.random_seed, 0, dir_iter, temp_path, progress);
+        mdtest_truncate((o.random_seed > 0 ? 1 : 0), 0, dir_iter, temp_path, progress);
       }
       t_end_before_barrier = GetTimeStamp();
       phase_end();
@@ -1592,6 +1935,9 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
     }
     VERBOSE(1,-1,"  File stat         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_STAT_NUM], o.summary_table[iteration].rate[MDTEST_FILE_STAT_NUM]);
     VERBOSE(1,-1,"  File read         : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_READ_NUM], o.summary_table[iteration].rate[MDTEST_FILE_READ_NUM]);
+    VERBOSE(1,-1,"  File symlink      : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_SYMLINK_NUM], o.summary_table[iteration].rate[MDTEST_FILE_SYMLINK_NUM]);
+    VERBOSE(1,-1,"  File readlink     : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_READLINK_NUM], o.summary_table[iteration].rate[MDTEST_FILE_READLINK_NUM]);
+    VERBOSE(1,-1,"  File unlink       : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_UNLINK_NUM], o.summary_table[iteration].rate[MDTEST_FILE_UNLINK_NUM]);
     VERBOSE(1,-1,"  File truncate     : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_TRUNCATE_NUM], o.summary_table[iteration].rate[MDTEST_FILE_TRUNCATE_NUM]);
     VERBOSE(1,-1,"  File rename       : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_RENAME_NUM], o.summary_table[iteration].rate[MDTEST_FILE_RENAME_NUM]);
     VERBOSE(1,-1,"  File removal      : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_REMOVE_NUM], o.summary_table[iteration].rate[MDTEST_FILE_REMOVE_NUM]);
@@ -1607,6 +1953,9 @@ char const * mdtest_test_name(int i){
   case MDTEST_FILE_CREATE_NUM: return "File creation";
   case MDTEST_FILE_STAT_NUM:   return "File stat";
   case MDTEST_FILE_READ_NUM:   return "File read";
+  case MDTEST_FILE_SYMLINK_NUM: return "File symlink";
+  case MDTEST_FILE_READLINK_NUM: return "File readlink";
+  case MDTEST_FILE_UNLINK_NUM: return "File unlink";
   case MDTEST_FILE_TRUNCATE_NUM: return "File truncate";
   case MDTEST_FILE_RENAME_NUM: return "File rename";
   case MDTEST_FILE_REMOVE_NUM: return "File removal";

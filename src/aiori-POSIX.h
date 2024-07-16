@@ -60,6 +60,9 @@ void POSIX_Close(aiori_fd_t *fd, aiori_mod_opt_t * module_options);
 option_help * POSIX_options(aiori_mod_opt_t ** init_backend_options, aiori_mod_opt_t * init_values);
 void POSIX_xfer_hints(aiori_xfer_hint_t * params);
 int POSIX_Truncate(const char *testFileName, IOR_offset_t newlength, aiori_mod_opt_t *param);
+int POSIX_SetAttr(const char *testFileName, aiori_mod_opt_t * param);
+int POSIX_Symlink(const char *targetFileName, const char *linkFileName, aiori_mod_opt_t * param);
+int POSIX_Readlink(const char *testFileName, aiori_mod_opt_t * param);
 
 
 #endif

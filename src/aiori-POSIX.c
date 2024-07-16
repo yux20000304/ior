@@ -31,6 +31,8 @@
 #include <fcntl.h>              /* IO operations */
 #include <sys/stat.h>
 #include <assert.h>
+#include <utime.h>
+#include <time.h>
 
 #ifdef HAVE_GPFS_H
 #  include <gpfs.h>
@@ -192,6 +194,9 @@ ior_aiori_t posix_aiori = {
         .enable_mdtest = true,
         .sync = POSIX_Sync,
         .truncate = POSIX_Truncate,
+        .setattr = POSIX_SetAttr,
+        .symlink = POSIX_Symlink,
+        .readlink = POSIX_Readlink,
         .check_params = POSIX_check_params
 };
 
@@ -880,15 +885,61 @@ void POSIX_Close(aiori_fd_t *afd, aiori_mod_opt_t * param)
 }
 
 /* 
- * Truncate files
+ * Truncate a file through the POSIX interface.
  */
 int POSIX_Truncate(const char *testFileName, IOR_offset_t newlength, aiori_mod_opt_t *param) {
-    int ret;
-    ret = truncate(testFileName, newlength);
-    if(ret < 0){
+    if(hints->dryRun)
+        return 0;
+    if(truncate(testFileName, newlength) < 0){
         WARNF("[RANK %03d]: truncate of file \"%s\" failed", rank, testFileName);
+        return -1;
     }
-    return ret;  
+    return 0;  
+}
+
+/*
+ * Set attributes on a file through the POSIX interface.
+ */
+int POSIX_SetAttr(const char *testFileName, aiori_mod_opt_t * param)
+{
+        if(hints->dryRun)
+          return 0;
+        struct utimbuf times;
+        times.actime = times.modtime = time(NULL);
+        if (utime(testFileName, &times) < 0) {
+                ERRF("utime(\"%s\", actime: %d, modtime: %d) failed", testFileName, times.actime, times.modtime);
+                return -1;
+        }
+        return 0;
+}
+
+/*
+ * Symlink a file through the POSIX interface.
+ */
+int POSIX_Symlink(const char *targetFileName, const char *linkFileName, aiori_mod_opt_t * param)
+{
+        if(hints->dryRun)
+          return 0;
+        if (symlink(targetFileName, linkFileName) < 0){
+                ERRF("symlink(\"%s\", \"%s\") failed", targetFileName, linkFileName);
+                return -1;
+        }
+        return 0;
+}
+
+/* 
+ * Readlink a file through the POSIX interface.
+ */
+int POSIX_Readlink(const char *testFileName, aiori_mod_opt_t * param)
+{
+        if(hints->dryRun)
+          return 0;
+        char buf[1024];
+        if (readlink(testFileName, buf, sizeof(buf) - 1) < 0) {
+                ERRF("readlink(\"%s\", ...) failed", testFileName);
+                return -1;
+        }
+        return 0;
 }
 
 /*
