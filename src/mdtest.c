@@ -821,7 +821,7 @@ void mdtest_symlink(const int random, const int dirs, const long dir_iter, char 
         /* create name of file/dir to symlink */
         if (dirs){
             if ((i%ITEM_COUNT == 0) && (i != 0)) {
-                VERBOSE(3,5,"symlink dirs: "LLU"", i);
+                VERBOSE(3,5,"symlink dir: "LLU"", i);
             }
             sprintf(item, "dir.%s"LLU"", o.stat_name, item_num);
         } else{
@@ -906,7 +906,7 @@ void mdtest_readlink(const int random, const int dirs, const long dir_iter, char
         /* create name of file/dir to readlink */
         if (dirs){
             if ((i%ITEM_COUNT == 0) && (i != 0)) {
-                VERBOSE(3,5,"readlink dirs: "LLU"", i);
+                VERBOSE(3,5,"readlink dir: "LLU"", i);
             }
             sprintf(item, "dir.%s"LLU"", o.stat_name, item_num);
         } else{
@@ -991,7 +991,7 @@ void mdtest_unlink(const int random, const int dirs, const long dir_iter, char *
         /* create name of file/dir to unlink */
         if (dirs){
             if ((i%ITEM_COUNT == 0) && (i != 0)) {
-                VERBOSE(3,5,"unlink dirs: "LLU"", i);
+                VERBOSE(3,5,"unlink dir: "LLU"", i);
             }
             sprintf(item, "dir.%s"LLU"", o.stat_name, item_num);
         } else{
@@ -1028,6 +1028,90 @@ void mdtest_unlink(const int random, const int dirs, const long dir_iter, char *
         double start = GetTimeStamp();
         /* unlink files */
         o.backend->remove (link_item, o.backend_options);
+        if(progress->ot) OpTimerValue(progress->ot, start - progress->start_time, GetTimeStamp() - start);        
+    }
+
+}
+
+/* setattr all of the files created as specified by the input parameters */
+void mdtest_setattr(const int random, const int dirs, const long dir_iter, char *path, rank_progress_t *progress){
+    uint64_t parent_dir, item_num = 0;
+    char item[MAX_PATHLEN], temp[MAX_PATHLEN];
+
+    VERBOSE(1,-1,"Entering mdtest_setattr on %s", path );
+    
+    uint64_t stop_items = o.items;
+    
+    if( o.directory_loops != 1 ){
+      stop_items = o.items_per_dir;
+    }
+    
+    /* iterate over all of the item IDs */
+    for (uint64_t i = 0 ; i < stop_items ; ++i) {
+        /*
+         * It doesn't make sense to pass the address of the array because that would
+         * be like passing char **. Tested it on a Cray and it seems to work either
+         * way, but it seems that it is correct without the "&".
+         *
+         * NTH: Both are technically correct in C.
+         *
+         * memset(&item, 0, MAX_PATHLEN);
+         */
+        memset(item, 0, MAX_PATHLEN);
+        memset(temp, 0, MAX_PATHLEN);
+        /* determine the item number to setattr */
+        if (random) {
+            item_num = o.rand_array[i];
+        } else {
+            item_num = i;
+        }
+
+        /* make adjustments if in leaf only mode*/
+        if (o.leaf_only) {
+            item_num += o.items_per_dir *
+                (o.num_dirs_in_tree - (uint64_t) pow (o.branch_factor, o.depth));
+        }
+
+        /* create name of file/dir to setattr */
+        if (dirs){
+            if ((i%ITEM_COUNT == 0) && (i != 0)) {
+                VERBOSE(3,5,"setattr dir: "LLU"", i);
+            }
+            sprintf(item, "dir.%s"LLU"", o.stat_name, item_num);
+        } else{
+            if ((i%ITEM_COUNT == 0) && (i != 0)) {
+                VERBOSE(3,5,"setattr file: "LLU"", i);
+            }
+            sprintf(item, "file.%s"LLU"", o.read_name, item_num);
+        }
+
+        /* determine the path to the file/dir to be setattr'ed */
+        parent_dir = item_num / o.items_per_dir;
+
+        if(parent_dir > 0){   //item is not in tree's root directory
+
+            /* prepend parent directory to item's path */
+            sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+            strcpy(item, temp);
+
+            //still not at the tree's root dir
+            while (parent_dir > o.branch_factor){
+                parent_dir = (unsigned long long) ((parent_dir-1) / o.branch_factor);
+                sprintf(temp, "%s."LLU"/%s", o.base_tree_name, parent_dir, item);
+                strcpy(item, temp);
+            }
+        }
+
+        /* Now get item to have the full path */
+        sprintf( temp, "%s/%s", path, item );
+        strcpy( item, temp );
+
+        /* below temp used to be hiername */
+        VERBOSE(3,5,"mdtest_symlink %4s: %s", (dirs ? "dir" : "file"), item);
+        double start = GetTimeStamp();
+        if (-1 == o.backend->setattr(item, o.backend_options)) {
+            WARNF("unable to setattr item %s", item);
+        }
         if(progress->ot) OpTimerValue(progress->ot, start - progress->start_time, GetTimeStamp() - start);        
     }
 
@@ -1199,7 +1283,7 @@ void collective_create_remove(const int create, const int dirs, const int ntasks
 }
 
 /* shuffle the files or directory */
-void rename_dir_test(const int dirs, const long dir_iter, const char *path, rank_progress_t * progress) {
+void mdtest_rename(const int dirs, const long dir_iter, const char *path, rank_progress_t * progress) {
     uint64_t parent_dir, item_num = 0;
     char item[MAX_PATHLEN], temp[MAX_PATHLEN];
     char item_last[MAX_PATHLEN];
@@ -1397,6 +1481,130 @@ void directory_test(const int iteration, const int ntasks, const char *path, ran
       updateResult(res, MDTEST_DIR_READ_NUM, o.items, t_start, t_end, t_end_before_barrier);
     }
 
+    /* symlink phase */
+    if (o.read_only) {
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_DIR_SYMLINK_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(READ_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+        VERBOSE(3,5,"directory_test: symlink path is '%s'", temp_path );
+
+        /* symlink dirs */
+        mdtest_symlink(0, 1, dir_iter, temp_path, progress);
+        phase_end();
+        t_end = GetTimeStamp();
+        OpTimerFree(& progress->ot);
+        updateResult(res, MDTEST_DIR_SYMLINK_NUM, o.items, t_start, t_end, t_end_before_barrier);
+      }
+    }
+
+    /* readlink phase */
+    if (o.read_only) {
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_DIR_READLINK_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(READ_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+        VERBOSE(3,5,"directory_test: readlink path is '%s'", temp_path );
+
+        /* readlink dirs */
+        mdtest_readlink(0, 1, dir_iter, temp_path, progress);
+        phase_end();
+        t_end = GetTimeStamp();
+        OpTimerFree(& progress->ot);
+        updateResult(res, MDTEST_DIR_READLINK_NUM, o.items, t_start, t_end, t_end_before_barrier);
+      }
+    }
+
+    /* unlink phase */
+    if (o.read_only) {
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_DIR_UNLINK_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(READ_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+        VERBOSE(3,5,"directory_test: unlink path is '%s'", temp_path );
+
+        /* unlink dirs */
+        mdtest_unlink(0, 1, dir_iter, temp_path, progress);
+        phase_end();
+        t_end = GetTimeStamp();
+        OpTimerFree(& progress->ot);
+        updateResult(res, MDTEST_DIR_UNLINK_NUM, o.items, t_start, t_end, t_end_before_barrier);
+      }
+    }
+
+    /* setattr phase */
+    if(o.stat_only){
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_DIR_SETATTR_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(STAT_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+        VERBOSE(3,5,"directory_test: setattr path is '%s'", temp_path );
+        /* setattr dirs */
+        mdtest_setattr(0, 1, dir_iter, temp_path, progress);
+      }
+      t_end_before_barrier = GetTimeStamp();
+      phase_end();
+      t_end = GetTimeStamp();
+      OpTimerFree(& progress->ot);
+      updateResult(res, MDTEST_DIR_SETATTR_NUM, o.items, t_start, t_end, t_end_before_barrier);
+    }
+
     /* rename phase */
     if(o.rename_dirs && o.items > 1){
       phase_prepare();
@@ -1414,7 +1622,7 @@ void directory_test(const int iteration, const int ntasks, const char *path, ran
 
         VERBOSE(3,5,"rename path is '%s'", temp_path );
 
-        rename_dir_test(1, dir_iter, temp_path, progress);
+        mdtest_rename(1, dir_iter, temp_path, progress);
       }
       t_end_before_barrier = GetTimeStamp();
       phase_end();
@@ -1466,6 +1674,10 @@ void directory_test(const int iteration, const int ntasks, const char *path, ran
 
     VERBOSE(1,-1,"   Directory creation: %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_CREATE_NUM], o.summary_table[iteration].rate[MDTEST_DIR_CREATE_NUM]);
     VERBOSE(1,-1,"   Directory stat    : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_STAT_NUM], o.summary_table[iteration].rate[MDTEST_DIR_STAT_NUM]);
+    VERBOSE(1,-1,"   Directory symlink : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_SYMLINK_NUM], o.summary_table[iteration].rate[MDTEST_DIR_SYMLINK_NUM]);
+    VERBOSE(1,-1,"   Directory readlink: %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_READLINK_NUM], o.summary_table[iteration].rate[MDTEST_DIR_READLINK_NUM]);
+    VERBOSE(1,-1,"   Directory unlink  : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_UNLINK_NUM], o.summary_table[iteration].rate[MDTEST_DIR_UNLINK_NUM]);
+    VERBOSE(1,-1,"   Directory setattr : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_SETATTR_NUM], o.summary_table[iteration].rate[MDTEST_DIR_SETATTR_NUM]);
     VERBOSE(1,-1,"   Directory rename  : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_RENAME_NUM], o.summary_table[iteration].rate[MDTEST_DIR_RENAME_NUM]);
     VERBOSE(1,-1,"   Directory removal : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_DIR_REMOVE_NUM], o.summary_table[iteration].rate[MDTEST_DIR_REMOVE_NUM]);
 }
@@ -1780,7 +1992,7 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
       }
     }
 
-    /* unlink*/
+    /* unlink phase */
     if (o.read_only) {
       phase_prepare();
       if(o.savePerOpDataCSV != NULL) {
@@ -1810,6 +2022,38 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
         updateResult(res, MDTEST_FILE_UNLINK_NUM, o.items, t_start, t_end, t_end_before_barrier);
       }
     }
+
+    /* setattr phase */
+    if(o.stat_only){
+      phase_prepare();
+      if(o.savePerOpDataCSV != NULL) {
+        char path[MAX_PATHLEN];
+        sprintf(path, "%s-%s-%05d.csv", o.savePerOpDataCSV, mdtest_test_name(MDTEST_FILE_SETATTR_NUM), rank);
+        progress->ot = OpTimerInit(path, 1);
+      }            
+      t_start = GetTimeStamp();
+      progress->start_time = t_start;
+      for (int dir_iter = 0; dir_iter < o.directory_loops; dir_iter ++){
+        prep_testdir(iteration, dir_iter);
+        if (o.unique_dir_per_task) {
+            unique_dir_access(STAT_SUB_DIR, temp_path);
+            if (! o.time_unique_dir_overhead) {
+                t_start = GetTimeStamp();
+            }
+        } else {
+            sprintf( temp_path, "%s/%s", o.testdir, path );
+        }
+        VERBOSE(3,5,"file_test: setattr path is '%s'", temp_path );
+        /* setattr files */
+        mdtest_setattr(0, 0, dir_iter, temp_path, progress);
+      }
+      t_end_before_barrier = GetTimeStamp();
+      phase_end();
+      t_end = GetTimeStamp();
+      OpTimerFree(& progress->ot);
+      updateResult(res, MDTEST_FILE_SETATTR_NUM, o.items, t_start, t_end, t_end_before_barrier);
+    }
+    
 
     /* truncate phase */
     if (o.read_only && o.truncate_bytes >= 0) {
@@ -1868,7 +2112,7 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
         VERBOSE(3,5,"file_test: rename path is '%s'", temp_path );
 
         /* rename files */
-        rename_dir_test(0, dir_iter, temp_path, progress);
+        mdtest_rename(0, dir_iter, temp_path, progress);
       }
       t_end_before_barrier = GetTimeStamp();
       phase_end();
@@ -1938,6 +2182,7 @@ void file_test(const int iteration, const int ntasks, const char *path, rank_pro
     VERBOSE(1,-1,"  File symlink      : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_SYMLINK_NUM], o.summary_table[iteration].rate[MDTEST_FILE_SYMLINK_NUM]);
     VERBOSE(1,-1,"  File readlink     : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_READLINK_NUM], o.summary_table[iteration].rate[MDTEST_FILE_READLINK_NUM]);
     VERBOSE(1,-1,"  File unlink       : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_UNLINK_NUM], o.summary_table[iteration].rate[MDTEST_FILE_UNLINK_NUM]);
+    VERBOSE(1,-1,"  File setattr      : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_SETATTR_NUM], o.summary_table[iteration].rate[MDTEST_FILE_SETATTR_NUM]);
     VERBOSE(1,-1,"  File truncate     : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_TRUNCATE_NUM], o.summary_table[iteration].rate[MDTEST_FILE_TRUNCATE_NUM]);
     VERBOSE(1,-1,"  File rename       : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_RENAME_NUM], o.summary_table[iteration].rate[MDTEST_FILE_RENAME_NUM]);
     VERBOSE(1,-1,"  File removal      : %14.3f sec, %14.3f ops/sec", res->time[MDTEST_FILE_REMOVE_NUM], o.summary_table[iteration].rate[MDTEST_FILE_REMOVE_NUM]);
@@ -1948,6 +2193,10 @@ char const * mdtest_test_name(int i){
   case MDTEST_DIR_CREATE_NUM: return "Directory creation";
   case MDTEST_DIR_STAT_NUM:   return "Directory stat";
   case MDTEST_DIR_READ_NUM:   return "Directory read";
+  case MDTEST_DIR_SYMLINK_NUM: return "Directory symlink";
+  case MDTEST_DIR_READLINK_NUM: return "Directory readlink";
+  case MDTEST_DIR_UNLINK_NUM: return "Directory unlink";
+  case MDTEST_DIR_SETATTR_NUM: return "Directory setattr"; 
   case MDTEST_DIR_REMOVE_NUM: return "Directory removal";
   case MDTEST_DIR_RENAME_NUM: return "Directory rename";
   case MDTEST_FILE_CREATE_NUM: return "File creation";
@@ -1956,6 +2205,7 @@ char const * mdtest_test_name(int i){
   case MDTEST_FILE_SYMLINK_NUM: return "File symlink";
   case MDTEST_FILE_READLINK_NUM: return "File readlink";
   case MDTEST_FILE_UNLINK_NUM: return "File unlink";
+  case MDTEST_FILE_SETATTR_NUM: return "File unlink";
   case MDTEST_FILE_TRUNCATE_NUM: return "File truncate";
   case MDTEST_FILE_RENAME_NUM: return "File rename";
   case MDTEST_FILE_REMOVE_NUM: return "File removal";
